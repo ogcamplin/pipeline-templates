@@ -1,0 +1,99 @@
+---
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        required: true
+        type: string
+        description: AWS region to deploy to.
+      account_id:
+        required: true
+        type: string
+        description: AWS account ID to deploy to.
+      role_name:
+        required: false
+        type: string
+        description: Name of the IAM role for deployment.
+        default: 'GithubActionsDeploymentRole'
+      tf_working_dir:
+        required: true
+        type: string
+        description: Directory containing the OpenTofu configuration files.
+      plan_name:
+        required: false
+        type: string
+        description: Name of the plan artifact.
+        default: 'tfplan'
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.tf_working_dir }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role_name }}
+          role-session-name: GithubActions
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: OpenTofu Setup
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ inputs.account_id }}:role/${{ inputs.role_name }}
+          role-session-name: GithubActions
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: OpenTofu Init
+        id: init
+        run: tofu init
+
+      - name: OpenTofu Plan
+        id: plan
+        run: tofu plan -no-color -out=${{ inputs.plan_name }}.json
+        continue-on-error: true
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.plan_name }}
+          path: ${{ inputs.tf_working_dir }}/${{ inputs.plan_name }}.json
+
+      - uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "tofu\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            #### OpenTofu Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ inputs.tf_working_dir }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
