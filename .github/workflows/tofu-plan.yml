@@ -66,8 +66,10 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          set -o pipefail
           tofu plan -no-color -out=${{ inputs.plan_name }}.json > plan.log 2>&1
           echo "exit_code=$?" >> $GITHUB_OUTPUT
+          cat plan.log
 
       - name: Show Plan
         run: tofu show ${{ inputs.plan_name }}.json
